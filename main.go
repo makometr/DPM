@@ -11,55 +11,37 @@ import (
 	"gonum.org/v1/plot/vg"
 )
 
-type flatPlotPoints struct {
+// FlatPlotPoints repesents data of some function values y = f(x)
+type FlatPlotPoints struct {
 	xs *mat.VecDense
 	ys *mat.VecDense
 }
 
-func newFlatPlotPoints(size int) *flatPlotPoints {
+func newFlatPlotPoints(size int) *FlatPlotPoints {
 	xs := mat.NewVecDense(size, nil)
 	ys := mat.NewVecDense(size, nil)
-	return &flatPlotPoints{xs, ys}
+	return &FlatPlotPoints{xs, ys}
 }
 
 func main() {
 	rand.Seed(1664)
-	basePoints := generateBaseData(100)
+	sampleSize := 100
+	basePoints := generateBaseData(sampleSize)
 
-	// Values for quadratic polynomial
-	basicBasisValues := mat.NewDense(100, 3, nil)
-	for i := 0; i < 100; i++ {
-		x := basePoints.xs.AtVec(i)
-		basicBasisValues.Set(i, 0, x*x)
-		basicBasisValues.Set(i, 1, x)
-		basicBasisValues.Set(i, 2, 1)
-	}
-
-	kfc := calculateBasisKfs(basicBasisValues, basePoints.ys)
+	kfc := CalculateQuadroPolynomKfs(basePoints)
 	fmt.Printf("kfs: %0.4v\n", mat.Formatted(kfc, mat.Prefix("     ")))
 
-	mnkPoints := newFlatPlotPoints(100)
-	for i := 0; i < 100; i++ {
+	lsPoints := newFlatPlotPoints(sampleSize) // least square points
+	for i := 0; i < lsPoints.xs.Len(); i++ {
 		x := basePoints.xs.AtVec(i)
-		mnkPoints.xs.SetVec(i, x)
-		mnkPoints.ys.SetVec(i, kfc.At(0, 0)*x*x+kfc.At(1, 0)*x+kfc.At(2, 0))
+		lsPoints.xs.SetVec(i, x)
+		lsPoints.ys.SetVec(i, kfc.At(0, 0)*x*x+kfc.At(1, 0)*x+kfc.At(2, 0))
 	}
 
-	drawData(basePoints, mnkPoints)
+	drawData(basePoints, lsPoints)
 }
 
-func calculateBasisKfs(basicBasisValues *mat.Dense, existedBasisValues *mat.VecDense) *mat.Dense {
-	var a mat.Dense
-	a.Product(basicBasisValues.T(), basicBasisValues) // ATA
-	a.Inverse(&a)                                     // (ATA)-1
-	var b mat.Dense
-	b.Product(basicBasisValues.T(), existedBasisValues) // ATb
-	b.Product(&a, &b)                                   // (ATA)-1 * ATb
-
-	return &b
-}
-
-func generateBaseData(size int) *flatPlotPoints {
+func generateBaseData(size int) *FlatPlotPoints {
 	x := make([]float64, size)
 	y := make([]float64, size)
 	for i := 0; i < size; i++ {
@@ -68,10 +50,10 @@ func generateBaseData(size int) *flatPlotPoints {
 	}
 	xs := mat.NewVecDense(size, x)
 	ys := mat.NewVecDense(size, y)
-	return &flatPlotPoints{xs, ys}
+	return &FlatPlotPoints{xs, ys}
 }
 
-func drawData(points ...*flatPlotPoints) {
+func drawData(points ...*FlatPlotPoints) {
 	p := plot.New()
 	descrs := []string{"Начальные точки", "Точки МНК-апппроксимации"}
 	for pointsIndex := 0; pointsIndex < len(points); pointsIndex++ {
