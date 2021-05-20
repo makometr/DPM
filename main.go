@@ -2,13 +2,14 @@ package main
 
 import (
 	"fmt"
+	"image/color"
 	"math/rand"
 
 	"gonum.org/v1/gonum/mat"
 	"gonum.org/v1/plot"
 	"gonum.org/v1/plot/plotter"
-	"gonum.org/v1/plot/plotutil"
 	"gonum.org/v1/plot/vg"
+	"gonum.org/v1/plot/vg/draw"
 )
 
 // FlatPlotPoints repesents data of some function values y = f(x)
@@ -53,21 +54,33 @@ func generateBaseData(size int) *FlatPlotPoints {
 	return &FlatPlotPoints{xs, ys}
 }
 
-func drawData(points ...*FlatPlotPoints) {
+func drawData(basePoints *FlatPlotPoints, lsPoints *FlatPlotPoints) {
 	p := plot.New()
-	descrs := []string{"Начальные точки", "Точки МНК-апппроксимации"}
-	for pointsIndex := 0; pointsIndex < len(points); pointsIndex++ {
-		pts := make(plotter.XYs, points[pointsIndex].xs.Len())
-		for i := range pts {
-			pts[i].X = points[pointsIndex].xs.AtVec(i)
-			pts[i].Y = points[pointsIndex].ys.AtVec(i)
-		}
-		plotutil.AddLines(p, descrs[pointsIndex], pts)
+	// descrs := []string{"Начальные точки", "Точки МНК-апппроксимации"}
+	pts := make(plotter.XYs, basePoints.xs.Len())
+
+	for i := range pts {
+		pts[i].X = basePoints.xs.AtVec(i)
+		pts[i].Y = basePoints.ys.AtVec(i)
 	}
+	lpPoints, _ := plotter.NewScatter(pts)
+	lpPoints.Shape = draw.CircleGlyph{}
+
+	for i := range pts {
+		pts[i].X = lsPoints.xs.AtVec(i)
+		pts[i].Y = lsPoints.ys.AtVec(i)
+	}
+	l, _ := plotter.NewLine(pts)
+	l.LineStyle.Width = 2
+	l.LineStyle.Color = color.RGBA{R: 255, A: 255}
+
 	p.Title.Text = "МНК - пример построения"
 	p.X.Label.Text = "X"
 	p.Y.Label.Text = "Y"
 	p.HideAxes()
+	p.Legend.Add("Начальные точки", lpPoints)
+	p.Legend.Add("МНК", l)
+	p.Add(l, lpPoints)
 
 	if err := p.Save(8*vg.Inch, 5*vg.Inch, "LeastSquaresExample.png"); err != nil {
 		panic(err)
