@@ -42,35 +42,117 @@ func (kf *kalmanFilter) launch() {
 	odeResult := kf.calcODE()
 	noiseODE := makeNormalNoise(odeResult)
 
-	drawKalmanResult(odeResult, noiseODE, nil)
+	R := mat.NewDense(2, 2, []float64{
+		4, 0,
+		0, 4,
+	})
+	H := mat.NewDense(2, 4, []float64{
+		1, 0, 0, 0,
+		0, 1, 0, 0,
+	})
+	Xi1 := mat.NewDense(4, 1, []float64{
+		1,
+		1,
+		0,
+		0,
+	})
+	Pi1 := mat.NewDense(4, 4, []float64{
+		0.1, 0, 0, 0,
+		0, 0.1, 0, 0,
+		0, 0, 0.1, 0,
+		0, 0, 0, 0.1,
+	})
+	// ti1 := 0
 
-	FData := []float64{
+	F := mat.NewDense(4, 4, []float64{
 		1, 0, kf.deltaT, 0,
 		0, 1, 0, kf.deltaT,
 		0, 0, 1, 0,
 		0, 0, 0, 1,
-	}
-	F := mat.NewDense(4, 4, FData)
+	})
 
-	GData := []float64{
+	G := mat.NewDense(4, 2, []float64{
 		math.Pow(kf.deltaT, 2), 0,
 		0, math.Pow(kf.deltaT, 2),
 		kf.deltaT, 0,
 		0, kf.deltaT,
-	}
-	G := mat.NewDense(4, 2, GData)
+	})
 
-	Г := mat.NewDense(4, 2, GData)
+	Г := mat.NewDense(4, 2, []float64{
+		math.Pow(kf.deltaT, 2), 0,
+		0, math.Pow(kf.deltaT, 2),
+		kf.deltaT, 0,
+		0, kf.deltaT,
+	})
 
-	rawQ := []float64{
+	Q := mat.NewDense(2, 2, []float64{
 		1, 0,
 		0, 1,
+	})
+
+	x := make([]float64, 100)
+	x[0] = 1
+	y := make([]float64, 100)
+	y[0] = 1
+
+	for ti := 1; ti < 100; ti++ {
+		fmt.Println("Step ", ti)
+		U := mat.NewVecDense(2, []float64{
+			kf.inputAction.xs.AtVec(ti),
+			kf.inputAction.ys.AtVec(ti),
+		})
+		Z := mat.NewVecDense(2, []float64{
+			noiseODE.xs.AtVec(ti),
+			noiseODE.ys.AtVec(ti),
+		})
+		Xi, Pi := doWork(Xi1, U, F, G, Pi1, Q, Г, Z, H, R)
+		x[ti] = Xi.At(0, 0)
+		y[ti] = Xi.At(1, 0)
+		Xi1.Copy(Xi)
+		Pi1.Copy(Pi)
 	}
-	Q := mat.NewDense(2, 2, rawQ)
-	fmt.Println(F)
-	fmt.Println(G)
-	fmt.Println(Г)
-	fmt.Println(Q)
+
+	drawKalmanResult(odeResult, noiseODE, &FlatPlotPoints{xs: mat.NewVecDense(100, x), ys: mat.NewVecDense(100, y)})
+}
+
+func doWork(X, U, F, G, P, Q, Г, Z, H, R mat.Matrix) (*mat.Dense, *mat.Dense) {
+	var XPrior, XPlhs, XPrhs mat.Dense
+	XPlhs.Product(F, X)
+	XPrhs.Product(G, U)
+	XPrior.Add(&XPlhs, &XPrhs)
+
+	var Pprior, ppriorlhs, ppriorrhs mat.Dense
+	ppriorlhs.Product(F, P, F.T())
+	ppriorrhs.Product(Г, Q, Г.T())
+	Pprior.Add(&ppriorlhs, &ppriorrhs)
+
+	var y mat.Dense
+	y.Product(H, &XPrior)
+	y.Sub(Z, &y)
+
+	var S mat.Dense
+	S.Product(H, &Pprior, H.T())
+	S.Add(&S, R)
+
+	var K, Sinv mat.Dense
+	Sinv.Inverse(&S)
+	K.Product(&Pprior, H.T(), &Sinv)
+
+	var XPost, xpostrhs mat.Dense
+	xpostrhs.Product(&K, &y)
+	XPost.Add(&XPrior, &xpostrhs)
+
+	var PPost mat.Dense
+	size, _ := X.Dims()
+	eye := mat.NewDiagDense(size, nil)
+	for i := 0; i < size; i++ {
+		eye.SetDiag(i, 1)
+	}
+	PPost.Product(&K, H)
+	PPost.Sub(eye, &PPost)
+	PPost.Product(&PPost, &Pprior)
+
+	return &XPost, &PPost
 }
 
 func (kf *kalmanFilter) calcODE() *FlatPlotPoints {
@@ -79,11 +161,11 @@ func (kf *kalmanFilter) calcODE() *FlatPlotPoints {
 	index := 0
 	odesys := func(x []float64, parameters []float64) []float64 {
 		dxdt := make([]float64, len(x))
-		t := kf.t.AtVec(index / 2) // костыль, т.к. эта функция на каждой итерации вызывается дважды
 		dxdt[0] = x[2]
 		dxdt[1] = x[3]
-		dxdt[2] = inputActions[0](t)
-		dxdt[3] = inputActions[1](t)
+		// костыль, т.к. эта функция на каждой итерации вызывается дважды
+		dxdt[2] = kf.inputAction.xs.AtVec(index / 2)
+		dxdt[3] = kf.inputAction.ys.AtVec(index / 2)
 
 		index++
 		return dxdt
@@ -100,7 +182,6 @@ func (kf *kalmanFilter) calcODE() *FlatPlotPoints {
 	for i := 0; i < kf.t.Len(); i++ {
 		result.xs.SetVec(i, state[0])
 		result.ys.SetVec(i, state[1])
-		// fmt.Println(float64(i)*integrator.StepSize(), state)
 
 		state, err = integrator.Step()
 		if err != nil {
@@ -111,6 +192,21 @@ func (kf *kalmanFilter) calcODE() *FlatPlotPoints {
 }
 
 func makeNormalNoise(data *FlatPlotPoints) *FlatPlotPoints {
+	// size := data.xs.Len()
+	// result := newFlatPlotPoints(size)
+
+	// for i := 0; i < size; i++ {
+	// 	var sign float64
+	// 	if i%2 == 1 {
+	// 		sign = 1
+	// 	} else {
+	// 		sign = -1
+	// 	}
+	// 	result.xs.SetVec(i, data.xs.AtVec(i)+(-1)*sign)
+	// 	result.ys.SetVec(i, data.ys.AtVec(i)+(-1)*sign)
+	// }
+
+	// return result
 	size := data.xs.Len()
 	result := newFlatPlotPoints(size)
 	ND := distuv.Normal{Mu: 0, Sigma: 1}
@@ -146,20 +242,20 @@ func drawKalmanResult(trues, noisyTrues, filtered *FlatPlotPoints) {
 	nt.LineStyle.Color = color.RGBA{G: 255, A: 255}
 	p.Legend.Add("Noisy", nt)
 
-	// for i := range pts {
-	// 	pts[i].X = noisyTrues.xs.AtVec(i)
-	// 	pts[i].Y = noisyTrues.ys.AtVec(i)
-	// }
-	// f, _ := plotter.NewLine(pts)
-	// f.LineStyle.Width = 2
-	// f.LineStyle.Color = color.RGBA{B: 255, A: 255}
-	// p.Legend.Add("Filter", f)
+	for i := range pts {
+		pts[i].X = filtered.xs.AtVec(i)
+		pts[i].Y = filtered.ys.AtVec(i)
+	}
+	f, _ := plotter.NewLine(pts)
+	f.LineStyle.Width = 2
+	f.LineStyle.Color = color.RGBA{B: 255, A: 255}
+	p.Legend.Add("Filter", f)
 
 	p.Title.Text = "МНК - пример построения"
 	p.X.Label.Text = "X"
 	p.Y.Label.Text = "Y"
-	p.HideAxes()
-	p.Add(nt, t)
+	// p.HideAxes()
+	p.Add(nt, t, f)
 
 	if err := p.Save(8*vg.Inch, 5*vg.Inch, "sas2.png"); err != nil {
 		panic(err)
