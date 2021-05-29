@@ -34,7 +34,7 @@ func main() {
 	// filter := newKalmanFilter(t, inputActions[0], inputActions[1])
 	// filter.launch()
 
-	doFilter()
+	launchParticleFilter()
 }
 
 func launchLeastSquares() {
