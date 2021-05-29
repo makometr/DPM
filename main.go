@@ -25,14 +25,16 @@ func newFlatPlotPoints(size int) *FlatPlotPoints {
 }
 
 func main() {
-	deltaT := float64(8) / (100 - 1)
-	t := mat.NewVecDense(100, nil)
-	for i := 0; i < t.Len(); i++ {
-		t.SetVec(i, float64(i)*deltaT)
-	}
+	// deltaT := float64(8) / (100 - 1)
+	// t := mat.NewVecDense(100, nil)
+	// for i := 0; i < t.Len(); i++ {
+	// 	t.SetVec(i, float64(i)*deltaT)
+	// }
 
-	filter := newKalmanFilter(t, inputActions[0], inputActions[1])
-	filter.launch()
+	// filter := newKalmanFilter(t, inputActions[0], inputActions[1])
+	// filter.launch()
+
+	doFilter()
 }
 
 func launchLeastSquares() {
