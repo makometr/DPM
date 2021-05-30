@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"math"
 	"math/rand"
+	"sync"
 
 	"github.com/icza/mjpeg"
 	"gonum.org/v1/gonum/mat"
@@ -28,6 +29,16 @@ func calcDelta(t, Z mat.Vector, θ mat.Vector) (result float64) {
 	for i := 0; i < Z.Len(); i++ {
 		result += math.Pow(math.Abs(Z.AtVec(i)-fFmodel(t.AtVec(i), θ)), 2)
 	}
+	return result
+}
+
+func shiftθ(θ []float64) []float64 {
+	result := make([]float64, len(θ))
+	copy(result, θ)
+	result[0] += randF(-0.1, 0.1)
+	result[1] += randF(-0.1, 0.1)
+	result[2] += randF(-0.1, 0.1)
+	result[3] += randF(-0.1, 0.1)
 	return result
 }
 
@@ -55,10 +66,22 @@ func newFilterState(N int) *filterState {
 }
 
 func (fs *filterState) updateWeights(t, Z mat.Vector) {
-	for i := 0; i < fs.weights.Len(); i++ {
-		deltaValue := calcDelta(t, Z, fs.θs.RowView(i))
-		fs.weights.SetVec(i, 1/deltaValue)
+	var chans = []chan bool{
+		make(chan bool),
+		make(chan bool),
 	}
+	a := func(begin, end int, chanIndex int) {
+		for i := begin; i < end; i++ {
+			deltaValue := calcDelta(t, Z, fs.θs.RowView(i))
+			fs.weights.SetVec(i, 1/deltaValue)
+		}
+		chans[chanIndex] <- true
+	}
+	go a(0, fs.weights.Len()/2, 0)
+	go a(fs.weights.Len()/2, fs.weights.Len(), 1)
+	<-chans[0]
+	<-chans[1]
+
 	fs.normalizeWeights()
 }
 
@@ -79,14 +102,22 @@ func (fs *filterState) updateθs() {
 	UD := distuv.Uniform{}
 	UD.Min = 0
 	UD.Max = mat.Max(fs.weights) * 2
+	uniqueIndeces := make(map[int]bool)
 	for i := 0; i < fs.θs.RawMatrix().Rows; i++ {
 		betta += UD.Rand()
 		for betta > fs.weights.AtVec(index) {
 			betta -= fs.weights.AtVec(index)
-			index = (index + 1) % 20
+			index = (index + 1) % fs.weights.Len()
 		}
-		newθs.SetRow(i, fs.θs.RawRowView(index))
-		newWeights.SetVec(i, fs.weights.AtVec(index))
+
+		if uniqueIndeces[index] == false {
+			uniqueIndeces[index] = true
+			newθs.SetRow(i, fs.θs.RawRowView(index))
+			newWeights.SetVec(i, fs.weights.AtVec(index))
+		} else {
+			newθs.SetRow(i, shiftθ(fs.θs.RawRowView(index)))
+			newWeights.SetVec(i, 1.0/float64(fs.weights.Len()))
+		}
 	}
 
 	fs.θs = newθs
@@ -94,26 +125,41 @@ func (fs *filterState) updateθs() {
 	// запоминаем индексы, если больше одного, то шифтим
 }
 
-func launchParticleFilter() {
-	N := 20
-	deltaT := float64(2) / (20 - 1)
-	X := mat.NewVecDense(20, nil)
+func launchParticleFilter() string {
+	N := 100
+	deltaT := float64(2) / float64(N-1)
+	X := mat.NewVecDense(N, nil)
 	for i := 0; i < X.Len(); i++ {
 		X.SetVec(i, float64(i)*deltaT)
 	}
 
-	filterState := newFilterState(N)
+	fs := newFilterState(200)
 	Z := getNoiseData(X, origF)
 
+	var wg sync.WaitGroup
+	wg.Add(N)
 	for i := 0; i < N; i++ {
-		filterState.updateWeights(X.SliceVec(0, i+1), Z.SliceVec(0, i+1))
+		fs.updateWeights(X.SliceVec(0, i+1), Z.SliceVec(0, i+1))
 		// fmt.Printf("weights: %0.4v\n", mat.Formatted(filterState.weights, mat.Prefix("         ")))
 
-		if (i+1)%4 == 0 {
-			filterState.updateθs()
+		if (i+1)%5 == 0 {
+			fs.updateθs()
 		}
-		drawparticleFilerStep("pf"+fmt.Sprint(i), X, filterState, X.SliceVec(0, i+1), Z.SliceVec(0, i+1))
+		// drawparticleFilterStep("pf"+fmt.Sprint(i), X, fs, X.SliceVec(0, i+1), Z.SliceVec(0, i+1))
+
+		copyTheta := fs.θs
+		copyTheta.Copy(fs.θs)
+		copyWeights := fs.weights
+		copyWeights.CopyVec(fs.weights)
+		go func(i int) {
+			drawparticleFilterStep("pf"+fmt.Sprint(i), X, &filterState{θs: copyTheta, weights: copyWeights}, X.SliceVec(0, i+1), Z.SliceVec(0, i+1))
+			wg.Done()
+		}(i)
+		index := fs.getBestModelIndex()
+		as := fs.θs.RawRowView(index)
+		fmt.Printf("%0.2f*e^(%0.2fx%+0.2f)+%0.2f\n", as[0], as[1], as[2], as[3])
 	}
+	wg.Wait()
 
 	checkErr := func(err error) {
 		if err != nil {
@@ -131,6 +177,7 @@ func launchParticleFilter() {
 	}
 
 	checkErr(aw.Close())
+	return ""
 }
 
 func getNoiseData(xs mat.Vector, realFunction func(float64) float64) *mat.VecDense {
@@ -138,7 +185,7 @@ func getNoiseData(xs mat.Vector, realFunction func(float64) float64) *mat.VecDen
 	zs := mat.NewVecDense(xs.Len(), nil)
 
 	for i := 0; i < xs.Len(); i++ {
-		zs.SetVec(i, origF(xs.AtVec(i)+ND.Rand()/5.0))
+		zs.SetVec(i, origF(xs.AtVec(i)+ND.Rand()/10.0))
 	}
 	return zs
 }
@@ -147,32 +194,22 @@ func randF(a, b float64) float64 {
 	return rand.Float64()*(b-a) + a
 }
 
-func getBestModelIndex(weights mat.Vector) int {
+func (fs filterState) getBestModelIndex() int {
 	bestIndex := 0
-	bestWeight := weights.AtVec(0)
-	for i := 1; i < weights.Len(); i++ {
-		if weights.AtVec(i) > bestWeight {
+	bestWeight := fs.weights.AtVec(0)
+	for i := 1; i < fs.weights.Len(); i++ {
+		if fs.weights.AtVec(i) > bestWeight {
 			bestIndex = i
-			bestWeight = weights.AtVec(i)
+			bestWeight = fs.weights.AtVec(i)
 		}
 	}
 	return bestIndex
 }
 
-func drawparticleFilerStep(name string, Xs *mat.VecDense, fs *filterState, ts, Z mat.Vector) {
+func drawparticleFilterStep(name string, Xs *mat.VecDense, fs *filterState, ts, Z mat.Vector) {
 	p := plot.New()
 	pts := make(plotter.XYs, Xs.Len())
 	var draws []plot.Plotter
-
-	for i := range pts {
-		pts[i].X = Xs.AtVec(i)
-		pts[i].Y = origF(pts[i].X)
-	}
-	t, _ := plotter.NewLine(pts)
-	t.LineStyle.Width = 2
-	t.LineStyle.Color = color.RGBA{R: 255, A: 255}
-	p.Legend.Add("Trues", t)
-	draws = append(draws, t)
 
 	for lineIndex := 0; lineIndex < fs.θs.RawMatrix().Rows; lineIndex++ {
 		for i := range pts {
@@ -186,7 +223,17 @@ func drawparticleFilerStep(name string, Xs *mat.VecDense, fs *filterState, ts, Z
 		draws = append(draws, t)
 	}
 
-	bestIModelIndex := getBestModelIndex(fs.weights)
+	for i := range pts {
+		pts[i].X = Xs.AtVec(i)
+		pts[i].Y = origF(pts[i].X)
+	}
+	t, _ := plotter.NewLine(pts)
+	t.LineStyle.Width = 2
+	t.LineStyle.Color = color.RGBA{R: 255, A: 255}
+	p.Legend.Add("Trues", t)
+	draws = append(draws, t)
+
+	bestIModelIndex := fs.getBestModelIndex()
 	for i := range pts {
 		pts[i].X = Xs.AtVec(i)
 		pts[i].Y = fFmodel(pts[i].X, fs.θs.RowView(bestIModelIndex))
@@ -204,7 +251,7 @@ func drawparticleFilerStep(name string, Xs *mat.VecDense, fs *filterState, ts, Z
 	}
 	lpPoints, _ := plotter.NewScatter(pts)
 	lpPoints.Shape = draw.PyramidGlyph{}
-	lpPoints.Color = color.RGBA{B: 255, A: 255}
+	lpPoints.Color = color.RGBA{R: 255, B: 255, A: 255}
 	draws = append(draws, lpPoints)
 
 	// p.HideAxes()

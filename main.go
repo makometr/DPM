@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"image/color"
+	"log"
 	"math/rand"
+	"time"
 
 	"gonum.org/v1/gonum/mat"
 	"gonum.org/v1/plot"
@@ -33,8 +35,12 @@ func main() {
 
 	// filter := newKalmanFilter(t, inputActions[0], inputActions[1])
 	// filter.launch()
+	start := time.Now()
 
 	launchParticleFilter()
+
+	elapsed := time.Since(start)
+	log.Printf("Data %s", elapsed)
 }
 
 func launchLeastSquares() {
@@ -59,7 +65,7 @@ func generateBaseData(size int) *FlatPlotPoints {
 	x := make([]float64, size)
 	y := make([]float64, size)
 	for i := 0; i < size; i++ {
-		x[i] = float64(i) / 100
+		x[i] = float64(i) / float64(size)
 		y[i] = x[i] + rand.Float64() - 0.5
 	}
 	xs := mat.NewVecDense(size, x)
