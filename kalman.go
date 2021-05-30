@@ -38,7 +38,9 @@ func newKalmanFilter(t *mat.VecDense, fX func(number float64) float64, fY func(n
 	return &kalmanFilter{t: t, inputAction: points, deltaT: t.AtVec(1) - t.AtVec(0)}
 }
 
-func (kf *kalmanFilter) launch() {
+func launchKalmanFilter() {
+	t := linespace(0, 8, 100)
+	kf := newKalmanFilter(t, inputActions[0], inputActions[1])
 	odeResult := kf.calcODE()
 	noiseODE := makeNormalNoise(odeResult)
 
@@ -257,7 +259,7 @@ func drawKalmanResult(trues, noisyTrues, filtered *FlatPlotPoints) {
 	// p.HideAxes()
 	p.Add(nt, t, f)
 
-	if err := p.Save(8*vg.Inch, 5*vg.Inch, "sas2.png"); err != nil {
+	if err := p.Save(8*vg.Inch, 5*vg.Inch, "KalmanExample.png"); err != nil {
 		panic(err)
 	}
 }
