@@ -15,7 +15,8 @@ import (
 
 var inputActions []func(n float64) float64 = []func(n float64) float64{
 	func(n float64) float64 {
-		return 2.5 * math.Sin(n)
+		return 0.1 * n
+		// return 2.5 * math.Sin(n)
 	},
 	func(n float64) float64 {
 		return -2.0 * math.Cos(n)
@@ -48,10 +49,7 @@ func launchKalmanFilter() {
 		4, 0,
 		0, 4,
 	})
-	H := mat.NewDense(2, 4, []float64{
-		1, 0, 0, 0,
-		0, 1, 0, 0,
-	})
+
 	Xi1 := mat.NewDense(4, 1, []float64{
 		1,
 		1,
@@ -66,8 +64,14 @@ func launchKalmanFilter() {
 	})
 	// ti1 := 0
 
+	// связь Z и X - переводит из 4мерного в 2мерное
+	H := mat.NewDense(2, 4, []float64{
+		math.Pow(kf.deltaT, 2) + 1, 0, 0, 0,
+		0, 1, 0, 0,
+	})
+
 	F := mat.NewDense(4, 4, []float64{
-		1, 0, kf.deltaT, 0,
+		1, 0, math.Sin(kf.deltaT) + kf.deltaT*math.Cos(kf.deltaT), 0,
 		0, 1, 0, kf.deltaT,
 		0, 0, 1, 0,
 		0, 0, 0, 1,
@@ -122,6 +126,8 @@ func doWork(X, U, F, G, P, Q, Г, Z, H, R mat.Matrix) (*mat.Dense, *mat.Dense) {
 	XPlhs.Product(F, X)
 	XPrhs.Product(G, U)
 	XPrior.Add(&XPlhs, &XPrhs)
+	// var XPrior mat.Dense
+	// XPrior.Product(F, X)
 
 	var Pprior, ppriorlhs, ppriorrhs mat.Dense
 	ppriorlhs.Product(F, P, F.T())
@@ -212,7 +218,7 @@ func makeNormalNoise(data *FlatPlotPoints) *FlatPlotPoints {
 	size := data.xs.Len()
 	result := newFlatPlotPoints(size)
 	ND := distuv.Normal{Mu: 0, Sigma: 1}
-	kf := 2.0
+	kf := 0.5
 
 	for i := 0; i < size; i++ {
 		result.xs.SetVec(i, data.xs.AtVec(i)+ND.Rand()*kf)

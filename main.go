@@ -10,8 +10,8 @@ import (
 func main() {
 	start := time.Now()
 
-	launchLeastSquares()
-	// launchKalmanFilter()
+	// launchLeastSquares()
+	launchKalmanFilter()
 	// launchParticleFilter()
 
 	elapsed := time.Since(start)
